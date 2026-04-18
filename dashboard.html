@@ -16,6 +16,7 @@
     .mono { font-family:Consolas,monospace; font-size:12px; word-break:break-all; }
     .status-online { color:#86efac; font-weight:700; }
     .status-offline { color:#fca5a5; font-weight:700; }
+    .mode-tag { display:inline-block; margin-top:4px; font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.12); }
     .item { border-top:1px solid rgba(255,255,255,.08); padding-top:8px; margin-top:8px; }
   </style>
 </head>
@@ -37,15 +38,23 @@
     const markers = {};
     let firstZoomDone = false;
 
+    function isOnline(lastSeen, active) {
+      if (active === false) return false;
+      if (!lastSeen) return false;
+      return (Date.now() - new Date(lastSeen).getTime()) < 120000;
+    }
+
     async function refreshData() {
       const status = document.getElementById('status');
       const usersEl = document.getElementById('users');
       const historyEl = document.getElementById('history');
+
       try {
         const res = await fetch(apiBase + '/api/dashboard/active');
         const data = await res.json();
         const latest = data.latest || {};
         const links = data.links || {};
+        const sessions = data.sessions || {};
         let bounds = [];
         let activeCount = 0;
 
@@ -60,11 +69,14 @@
         });
 
         usersEl.innerHTML = Object.entries(links).map(([token, item]) => {
-          const online = item.last_seen && (Date.now() - new Date(item.last_seen).getTime()) < 120000;
-          return `<div class="item"><strong>${item.label || 'Participant'}</strong><br/><span class="mono">${token}</span><br/><span class="${online ? 'status-online' : 'status-offline'}">${online ? 'Online' : 'Offline'}</span></div>`;
+          const session = sessions[token] || {};
+          const online = isOnline(item.last_seen, session.active);
+          const modeTag = item.mode === 'one_time' ? 'One-time' : 'Live';
+          const usedText = item.mode === 'one_time' && item.used ? '<br/>Used: yes' : '';
+          return `<div class="item"><strong>${item.label || 'Participant'}</strong><br/><span class="mono">${token}</span><br/><span class="${online ? 'status-online' : 'status-offline'}">${online ? 'Online' : 'Offline'}</span><br/><span class="mode-tag">${modeTag}</span>${usedText}</div>`;
         }).join('') || 'No active users yet.';
 
-        status.textContent = 'Loaded ' + activeCount + ' live marker(s) at ' + new Date().toLocaleTimeString();
+        status.textContent = 'Loaded ' + activeCount + ' marker(s) at ' + new Date().toLocaleTimeString();
 
         const firstToken = Object.keys(latest)[0];
         if (firstToken) {
@@ -74,6 +86,8 @@
             const battWarn = (item.battery !== null && item.battery !== undefined && item.battery <= 20) ? ' | Low battery: ' + item.battery + '%' : '';
             return `<div class="item">${item.timestamp}<br/>${item.latitude}, ${item.longitude}${battWarn}</div>`;
           }).join('') || 'No history yet.';
+        } else {
+          historyEl.innerHTML = 'No history yet.';
         }
 
         if (bounds.length) {

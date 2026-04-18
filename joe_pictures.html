@@ -8,27 +8,31 @@
     body { margin:0; font-family:Arial,sans-serif; min-height:100vh; display:grid; place-items:center; background:linear-gradient(135deg,#0f172a,#1e293b); color:white; padding:24px; }
     .card { width:min(760px,100%); background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:24px; padding:28px; }
     .warn { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.35); padding:14px; border-radius:14px; margin:18px 0; }
+    .done { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.35); padding:14px; border-radius:14px; margin-top:18px; }
     button { background:#22c55e; color:white; border:0; border-radius:12px; padding:14px 18px; font-size:16px; font-weight:700; cursor:pointer; }
     .small { color:#cbd5e1; font-size:14px; line-height:1.6; }
     input { width:100%; padding:12px; border-radius:10px; border:0; margin:8px 0 16px 0; }
+    .mode-tag { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,.12); margin-left:8px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Family Auto Share Project</h1>
+  <div class="card" id="appCard">
+    <h1>Family Auto Share Project <span class="mode-tag">One-time</span></h1>
     <p>Consent-based live location sharing for family members and trusted friends.</p>
-    <div class="warn"><strong>Consent required.</strong> If you accept, your live location will be shared with <strong>Parent / Organizer</strong> for <strong>500 minutes</strong>.</div>
-    <p class="small">Invite label: <strong>TEST</strong><br/>Session token: <code>LaBz0U1OO__N9w</code></p>
+    <div class="warn"><strong>Consent required.</strong> Tap Accept, then allow location when your browser asks.</div>
+    <p class="small">Invite label: <strong>joe_pictures</strong><br/>Session token: <code>joe_pictures</code></p>
     <label class="small">Your name</label>
-    <input id="name" placeholder="Enter your name" value="TEST" />
-    <button id="startBtn">Accept & Start Live Location Sharing</button>
+    <input id="name" placeholder="Enter your name" value="joe_pictures" />
+    <button id="startBtn">Accept & Start One-Time Location Share</button>
     <div id="status" class="small" style="margin-top:12px;">Waiting for user action.</div>
   </div>
   <script>
     const apiBase = 'https://o2-ym28.onrender.com';
-    const token = "LaBz0U1OO__N9w";
+    const token = "joe_pictures";
+    const mode = "one_time";
     const statusEl = document.getElementById('status');
     const nameEl = document.getElementById('name');
+    const appCard = document.getElementById('appCard');
     let lowBatteryAlerted = false;
 
     function beep(freq=880, duration=160) {
@@ -52,6 +56,19 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!res.ok) {
+        let detail = 'Request failed';
+        try {
+          const data = await res.json();
+          detail = data.detail || detail;
+        } catch (e) {}
+        throw new Error(detail);
+      }
+      return res.json();
+    }
+
+    async function getJson(url) {
+      const res = await fetch(apiBase + url);
       return res.json();
     }
 
@@ -61,6 +78,21 @@
         const battery = await navigator.getBattery();
         return Math.round(battery.level * 100);
       } catch (e) { return null; }
+    }
+
+    function finishOneTime(message) {
+      appCard.innerHTML = '<h1>Location Sent Successfully</h1><div class="done">' + message + '</div><p class="small" style="margin-top:14px;">This one-time link has been completed and should not be used again.</p>';
+      setTimeout(() => {
+        try { window.close(); } catch (e) {}
+      }, 2500);
+    }
+
+    async function checkUsedStatus() {
+      if (mode !== 'one_time') return;
+      try {
+        const data = await getJson('/api/link-status/' + token);
+        if (data.used) finishOneTime('This one-time link has already been used.');
+      } catch (e) {}
     }
 
     document.getElementById('startBtn').addEventListener('click', async () => {
@@ -80,7 +112,8 @@
               token,
               participant_name: participantName,
               expires_minutes: 500,
-              battery
+              battery,
+              mode
             });
 
             await postJson('/api/location/update', {
@@ -93,6 +126,14 @@
             });
 
             beep(980, 140);
+
+            if (mode === 'one_time') {
+              let extra = '';
+              if (battery !== null && battery <= 20) extra = ' Low battery: ' + battery + '%.';
+              finishOneTime('Your current location was sent successfully.' + extra);
+              return;
+            }
+
             let extra = '';
             if (battery !== null && battery <= 20) {
               extra = ' | Low battery: ' + battery + '%';
@@ -135,7 +176,10 @@
               { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
             );
           } catch (e) {
-            statusEl.textContent = 'Backend error. Could not start sharing.';
+            statusEl.textContent = e.message || 'Backend error. Could not start sharing.';
+            if (mode === 'one_time' && String(e.message).toLowerCase().includes('already been used')) {
+              finishOneTime('This one-time link has already been used.');
+            }
           }
         },
         (error) => {
@@ -145,6 +189,8 @@
         { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
       );
     });
+
+    checkUsedStatus();
   </script>
 </body>
 </html>
