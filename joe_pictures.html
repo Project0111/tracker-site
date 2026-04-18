@@ -17,19 +17,19 @@
 </head>
 <body>
   <div class="card" id="appCard">
-    <h1>Family Auto Share Project <span class="mode-tag">One-time</span></h1>
+    <h1>Family Auto Share Project <span class="mode-tag">Live</span></h1>
     <p>Consent-based live location sharing for family members and trusted friends.</p>
     <div class="warn"><strong>Consent required.</strong> Tap Accept, then allow location when your browser asks.</div>
-    <p class="small">Invite label: <strong>joe_pictures</strong><br/>Session token: <code>joe</code></p>
+    <p class="small">Invite label: <strong>joe_pictures</strong><br/>Session token: <code>joe_pictures</code></p>
     <label class="small">Your name</label>
     <input id="name" placeholder="Enter your name" value="joe_pictures" />
-    <button id="startBtn">Accept & Start One-Time Location Share</button>
+    <button id="startBtn">Accept & Start Live Location Sharing</button>
     <div id="status" class="small" style="margin-top:12px;">Waiting for user action.</div>
   </div>
   <script>
     const apiBase = 'https://o2-ym28.onrender.com';
-    const token = "joe";
-    const mode = "one_time";
+    const token = "joe_pictures";
+    const mode = "live";
     const statusEl = document.getElementById('status');
     const nameEl = document.getElementById('name');
     const appCard = document.getElementById('appCard');
@@ -50,21 +50,38 @@
       } catch (e) {}
     }
 
-    async function postJson(url, payload) {
-      const res = await fetch(apiBase + url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        let detail = 'Request failed';
+    async function wakeBackend() {
+      try {
+        await fetch(apiBase, { method: 'GET', cache: 'no-store' });
+      } catch (e) {}
+    }
+
+    async function postJson(url, payload, retries=5) {
+      let lastErr = new Error('Backend not responding');
+      for (let i = 0; i < retries; i++) {
         try {
-          const data = await res.json();
-          detail = data.detail || detail;
-        } catch (e) {}
-        throw new Error(detail);
+          const res = await fetch(apiBase + url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) {
+            let detail = 'Request failed';
+            try {
+              const data = await res.json();
+              detail = data.detail || detail;
+            } catch (e) {}
+            lastErr = new Error(detail);
+          } else {
+            return await res.json();
+          }
+        } catch (e) {
+          lastErr = e;
+        }
+        statusEl.textContent = 'Waiting for server… attempt ' + (i + 1);
+        await new Promise(r => setTimeout(r, 3000));
       }
-      return res.json();
+      throw lastErr;
     }
 
     async function getJson(url) {
@@ -82,9 +99,7 @@
 
     function finishOneTime(message) {
       appCard.innerHTML = '<h1>Location Sent Successfully</h1><div class="done">' + message + '</div><p class="small" style="margin-top:14px;">This one-time link has been completed and should not be used again.</p>';
-      setTimeout(() => {
-        try { window.close(); } catch (e) {}
-      }, 2500);
+      setTimeout(() => { try { window.close(); } catch (e) {} }, 2500);
     }
 
     async function checkUsedStatus() {
@@ -102,6 +117,8 @@
         return;
       }
 
+      statusEl.textContent = 'Waking server…';
+      await wakeBackend();
       statusEl.textContent = 'Requesting location permission…';
 
       navigator.geolocation.getCurrentPosition(
@@ -155,7 +172,7 @@
                     accuracy: pos.coords.accuracy,
                     battery: batteryNow,
                     timestamp: new Date().toISOString()
-                  });
+                  }, 3);
                   let liveExtra = '';
                   if (batteryNow !== null && batteryNow <= 20) {
                     liveExtra = ' | Low battery: ' + batteryNow + '%';
@@ -166,25 +183,26 @@
                   }
                   statusEl.textContent = 'Live sharing active: ' + new Date().toLocaleTimeString() + liveExtra;
                 } catch (e) {
-                  statusEl.textContent = 'Update failed. Backend may be offline.';
+                  statusEl.textContent = 'Update failed: ' + (e.message || 'unknown error');
                 }
               },
               (err) => {
                 beep(420, 220);
-                statusEl.textContent = 'Live update error: ' + err.message;
+                statusEl.textContent = 'Location error: ' + err.message;
               },
               { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
             );
           } catch (e) {
-            statusEl.textContent = e.message || 'Backend error. Could not start sharing.';
             if (mode === 'one_time' && String(e.message).toLowerCase().includes('already been used')) {
               finishOneTime('This one-time link has already been used.');
+            } else {
+              statusEl.textContent = 'Start failed: ' + (e.message || 'unknown error');
             }
           }
         },
         (error) => {
           beep(420, 220);
-          statusEl.textContent = 'Location permission denied or unavailable: ' + error.message;
+          statusEl.textContent = 'Location error: ' + error.message;
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
       );
