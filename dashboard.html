@@ -29,7 +29,6 @@
     </aside>
     <main><div id="map"></div></main>
   </div>
-
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const apiBase = 'https://o2-ym28.onrender.com';
@@ -37,70 +36,35 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     const markers = {};
     let firstZoomDone = false;
-    let onlineState = {};
-
-    function beep(freq=900, duration=140) {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = freq;
-        gain.gain.value = 0.05;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        setTimeout(() => {
-          osc.stop();
-          ctx.close();
-        }, duration);
-      } catch (e) {}
-    }
-
-    function isOnline(lastSeen) {
-      if (!lastSeen) return false;
-      const diff = Date.now() - new Date(lastSeen).getTime();
-      return diff < 120000;
-    }
 
     async function refreshData() {
       const status = document.getElementById('status');
       const usersEl = document.getElementById('users');
       const historyEl = document.getElementById('history');
-
       try {
         const res = await fetch(apiBase + '/api/dashboard/active');
         const data = await res.json();
         const latest = data.latest || {};
         const links = data.links || {};
-        let activeCount = 0;
         let bounds = [];
+        let activeCount = 0;
 
         Object.entries(latest).forEach(([token, point]) => {
           if (!point) return;
           const latlng = [point.latitude, point.longitude];
           bounds.push(latlng);
-          if (!markers[token]) {
-            markers[token] = L.marker(latlng).addTo(map);
-          } else {
-            markers[token].setLatLng(latlng);
-          }
-          const batt = point.battery ?? 'n/a';
-          markers[token].bindPopup(`Token: ${token}<br/>${point.timestamp}<br/>Battery: ${batt}`);
+          if (!markers[token]) markers[token] = L.marker(latlng).addTo(map);
+          else markers[token].setLatLng(latlng);
+          markers[token].bindPopup(`Token: ${token}<br/>${point.timestamp}<br/>Battery: ${point.battery ?? 'n/a'}`);
           activeCount += 1;
         });
 
-        const userHtml = Object.entries(links).map(([token, item]) => {
-          const online = isOnline(item.last_seen);
-          const prev = onlineState[token];
-          if (prev !== undefined && prev !== online) {
-            beep(online ? 980 : 420, online ? 120 : 220);
-          }
-          onlineState[token] = online;
+        usersEl.innerHTML = Object.entries(links).map(([token, item]) => {
+          const online = item.last_seen && (Date.now() - new Date(item.last_seen).getTime()) < 120000;
           return `<div class="item"><strong>${item.label || 'Participant'}</strong><br/><span class="mono">${token}</span><br/><span class="${online ? 'status-online' : 'status-offline'}">${online ? 'Online' : 'Offline'}</span></div>`;
-        }).join('');
-        usersEl.innerHTML = userHtml || 'No active users yet.';
-        status.textContent = `Loaded ${activeCount} live marker(s) at ` + new Date().toLocaleTimeString();
+        }).join('') || 'No active users yet.';
+
+        status.textContent = 'Loaded ' + activeCount + ' live marker(s) at ' + new Date().toLocaleTimeString();
 
         const firstToken = Object.keys(latest)[0];
         if (firstToken) {
@@ -110,8 +74,6 @@
             const battWarn = (item.battery !== null && item.battery !== undefined && item.battery <= 20) ? ' | Low battery: ' + item.battery + '%' : '';
             return `<div class="item">${item.timestamp}<br/>${item.latitude}, ${item.longitude}${battWarn}</div>`;
           }).join('') || 'No history yet.';
-        } else {
-          historyEl.innerHTML = 'No history yet.';
         }
 
         if (bounds.length) {
@@ -123,7 +85,7 @@
           }
         }
       } catch (err) {
-        status.textContent = 'Backend unavailable. Set your public API URL and start the server.';
+        status.textContent = 'Backend unavailable.';
       }
     }
 
