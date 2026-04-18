@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Family Auto Share Project</title>
+  <style>
+    body {
+      margin:0; font-family:Arial,sans-serif; min-height:100vh; display:grid; place-items:center;
+      background:linear-gradient(135deg,#0f172a,#1e293b); color:white; padding:24px;
+    }
+    .card { width:min(760px,100%); background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:24px; padding:28px; }
+    .warn { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.35); padding:14px; border-radius:14px; margin:18px 0; }
+    button { background:#22c55e; color:white; border:0; border-radius:12px; padding:14px 18px; font-size:16px; font-weight:700; cursor:pointer; }
+    .small { color:#cbd5e1; font-size:14px; line-height:1.6; }
+    input { width:100%; padding:12px; border-radius:10px; border:0; margin:8px 0 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Family Auto Share Project</h1>
+    <p>Consent-based live location sharing for family members and trusted friends.</p>
+    <div class="warn">
+      <strong>Consent required.</strong> If you accept, your live location will be shared with <strong>Parent / Organizer</strong> for <strong>500 minutes</strong>.
+    </div>
+    <p class="small">Invite label: <strong>YOURNAME</strong><br/>Session token: <code>J7fAe0TO2A3vEA</code></p>
+    <label class="small">Your name</label>
+    <input id="name" placeholder="Enter your name" value="YOURNAME" />
+    <button id="startBtn">Accept & Start Live Location Sharing</button>
+    <div id="status" class="small" style="margin-top:12px;">Waiting for user action.</div>
+  </div>
+  <script>
+    const apiBase = 'https://o2-ym28.onrender.com';
+    const token = "J7fAe0TO2A3vEA";
+    const statusEl = document.getElementById('status');
+    const nameEl = document.getElementById('name');
+    let lowBatteryAlerted = false;
+
+    function beep(freq=880, duration=160) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.value = 0.05;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        setTimeout(() => {
+          osc.stop();
+          ctx.close();
+        }, duration);
+      } catch (e) {}
+    }
+
+    async function postJson(url, payload) {
+      const res = await fetch(apiBase + url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.json();
+    }
+
+    async function getBatteryLevel() {
+      try {
+        if (!navigator.getBattery) return null;
+        const battery = await navigator.getBattery();
+        return Math.round(battery.level * 100);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    document.getElementById('startBtn').addEventListener('click', async () => {
+      const participantName = nameEl.value.trim() || 'Participant';
+      if (!navigator.geolocation) {
+        statusEl.textContent = 'Geolocation is not supported on this device.';
+        return;
+      }
+
+      const battery = await getBatteryLevel();
+      statusEl.textContent = 'Accepting link and starting session…';
+      try {
+        await postJson('/api/session/start', { token, participant_name: participantName, expires_minutes: 500, battery });
+        beep(980, 140);
+      } catch (e) {
+        statusEl.textContent = 'Could not start session. Check backend.';
+        return;
+      }
+
+      navigator.geolocation.watchPosition(async (position) => {
+        const batteryNow = await getBatteryLevel();
+        const payload = {
+          token,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          battery: batteryNow,
+          timestamp: new Date().toISOString()
+        };
+        try {
+          await postJson('/api/location/update', payload);
+          let extra = '';
+          if (batteryNow !== null && batteryNow <= 20) {
+            extra = ' | Low battery: ' + batteryNow + '%';
+            if (!lowBatteryAlerted) {
+              beep(520, 260);
+              lowBatteryAlerted = true;
+            }
+          }
+          statusEl.textContent = 'Live sharing active: ' + new Date().toLocaleTimeString() + extra;
+        } catch (e) {
+          statusEl.textContent = 'Update failed. Backend may be offline.';
+        }
+      }, (error) => {
+        beep(420, 220);
+        statusEl.textContent = 'Location error: ' + error.message;
+      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 });
+    });
+  </script>
+</body>
+</html>
